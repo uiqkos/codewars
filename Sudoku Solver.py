@@ -1,5 +1,4 @@
 def get_possible(y, x, puzzle):
-
     possible_horizontal = list(filter(lambda i: i not in puzzle[y], list(range(1, 10))))
     possible_vertical = list(filter(lambda i: i not in [puzzle[j][x] for j in range(9)], list(range(1, 10))))
     possible_in_square = list(set(possible_horizontal) & set(possible_vertical))
@@ -21,30 +20,30 @@ def sudoku(puzzle):
         for j in range(9):
             if puzzle[i][j] == 0:
                 possible = get_possible(i, j, puzzle)
-                print(i, j, puzzle[i][j], possible)
-                for line in puzzle:
-                    print(line)
+
                 if len(possible) == 0:
                     return None
 
                 for possible_ in possible:
-                    next_puzzle = [p for p in puzzle]
+                    next_puzzle = [line[:] for line in puzzle]  # puzzle.deepcopy()  # [p for p in puzzle]
                     next_puzzle[i][j] = possible_
+
                     next_solved_puzzle = sudoku(next_puzzle)
 
                     if next_solved_puzzle is not None:
                         return next_solved_puzzle
 
                 return None
-    return None
+    return puzzle
 
-puzzle = [[5, 3, 0, 0, 7, 0, 0, 0, 0],
-          [6, 0, 0, 1, 9, 5, 0, 0, 0],
-          [0, 9, 8, 0, 0, 0, 0, 6, 0],
-          [8, 0, 0, 0, 6, 0, 0, 0, 3],
-          [4, 0, 0, 8, 0, 3, 0, 0, 1],
-          [7, 0, 0, 0, 2, 0, 0, 0, 6],
-          [0, 6, 0, 0, 0, 0, 2, 8, 0],
-          [0, 0, 0, 4, 1, 9, 0, 0, 5],
-          [0, 0, 0, 0, 8, 0, 0, 7, 9]]
-print(sudoku(puzzle))
+
+puzzle_ = [[5, 3, 0, 0, 7, 0, 0, 0, 0],
+           [6, 0, 0, 1, 9, 5, 0, 0, 0],
+           [0, 9, 8, 0, 0, 0, 0, 6, 0],
+           [8, 0, 0, 0, 6, 0, 0, 0, 3],
+           [4, 0, 0, 8, 0, 3, 0, 0, 1],
+           [7, 0, 0, 0, 2, 0, 0, 0, 6],
+           [0, 6, 0, 0, 0, 0, 2, 8, 0],
+           [0, 0, 0, 4, 1, 9, 0, 0, 5],
+           [0, 0, 0, 0, 8, 0, 0, 7, 9]]
+print(sudoku(puzzle_))
