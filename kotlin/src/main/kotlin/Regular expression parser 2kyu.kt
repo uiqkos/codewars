@@ -1,3 +1,5 @@
+import java.lang.IllegalArgumentException
+
 interface RegExp {
     override fun toString(): String
 }
@@ -14,9 +16,17 @@ class Any : RegExp {
     }
 }
 
-data class Or(val first: RegExp = Void(), var second: RegExp = Void()) : RegExp {
+data class Or(
+    val first: RegExp,
+    var second: RegExp = Void()
+) : RegExp {
     override fun toString(): String {
         return "Or($first, $second)"
+    }
+
+    fun apply(regExp: RegExp): RegExp {
+        second = regExp
+        return this
     }
 }
 
@@ -44,42 +54,52 @@ data class Str(var content: List<RegExp>) : RegExp {
 data class RegExpParser(val input: String) {
 
     fun parse(): RegExp {
+        val content: MutableList<RegExp> = mutableListOf()
         var prev: RegExp = Void()
+        var operation: (RegExp) -> RegExp = {r -> r}
 
-        for (c in input) {
-            var next = when (c) {
+        fun resetOperation() = run {
+            operation = { r ->
+                content.add(r)
+                r
+            }
+        }
+
+        resetOperation()
+
+        for (c in input.reversed()) {
+            print("$prev -> ")
+
+            prev = when (c) {
                 in 'a'..'z',
                 in 'A'..'Z',
-                in '0'..'9' -> Normal(c)
+                in '0'..'9' -> Normal(c).let(operation).also { resetOperation() }
+                '.' -> Any().let(operation).also { resetOperation() }
 
-                '|' -> Or(prev)
-                '.' -> Any()
-                '*' -> ZeroOrMore(prev)
+                '|' -> Or(prev).also {
+                    operation = it::apply
+                }
+                '*' -> Void().also {
+                    operation = ::ZeroOrMore
+                }
 
-                else -> Void()
+                else -> throw IllegalArgumentException("undefined token: $c")
             }
-            when {
-                prev is Or &&
-                    prev.second is Void ->
-                    next = prev.let {
-                        it.second = next
-                        it
-                    }
-
-                prev is Normal &&
-                    next is Normal -> next = Str(mutableListOf(prev, next))
-
-                prev is Str &&
-                    next is Normal -> next = Str(prev.content.plus(next))
-            }
-            prev = next
-            print("$prev -> ")
+//            when {
+//                prev is Normal
+//            }
         }
-        return prev
+
+        return content.reversed().let {
+            if (it.size == 1) it.first()
+            else Str(it)
+        }
     }
 }
 
 fun main() {
     println(RegExpParser("ab*").parse())
     println(RegExpParser("a.*").parse())
+    println(RegExpParser("a|b").parse())
+    println(RegExpParser("a|b*").parse())
 }
