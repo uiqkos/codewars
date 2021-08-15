@@ -6,6 +6,21 @@ class SampleAssemblerInterpreterSuite extends AnyFunSpec {
 
   import AssemblerInterpreter._
 
+  describe("Parse arguments tests") {
+    assert (
+      Interpreter.parseArguments(
+        "a, 'mod(11, 3) = 2', b") == List("a", "mod(11, 3) = 2", "b")
+    )
+    assert (
+      Interpreter.parseArguments(
+        "a, '(5+1)/2 = 3', b") == List("a", "(5+1)/2 = 3", "b")
+    )
+    assert (
+      Interpreter.parseArguments(
+        "a, '(5+1)/2 = 3'") == List("a", "(5+1)/2 = 3")
+    )
+  }
+
   describe("Simple tests") {
     val simplePrograms = Array(
       "\n; My first program\nmov  a, 5\ninc  a\ncall function\nmsg  '(5+1)/2 = ', a    ; output message\nend\n\nfunction:\n    div  a, 2\n    ret\n",
@@ -25,8 +40,9 @@ class SampleAssemblerInterpreterSuite extends AnyFunSpec {
       None,
       Some("2^10 = 1024"));
 
-    for( (prg, result) <- simplePrograms zip expected )
+    for( (prg, result) <- simplePrograms zip expected ) {
       check_program(prg, result)
+    }
   }
 
   def check_program(program: String, expected: Option[String]): Unit = {

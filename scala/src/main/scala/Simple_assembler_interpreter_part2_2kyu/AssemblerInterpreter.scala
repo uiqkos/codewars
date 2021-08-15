@@ -1,220 +1,225 @@
 package Simple_assembler_interpreter_part2_2kyu
 
-import Simple_assembler_interpreter_part2_2kyu.Interpreter.Instruction
+import Interpreter._
 
-import java.lang.reflect.InvocationTargetException
-import scala.Function.tupled
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
-import scala.util.control.Breaks.break
+import scala.util.control.Breaks.{break, breakable}
 
 
 class Interpreter(
   var variables: mutable.Map[String, Int] = mutable.Map.empty[String, Int],
-  var instructions: List[Instruction] = List.empty[Instruction]
+  var instructions: ListBuffer[Instruction] = ListBuffer.empty[Instruction]
 ) {
-
   var nextInstruction = 0
   var functionIndexes = Map.empty[String, Int] // label -> index
   var e = 0
   var output: Option[String] = Option.empty[String]
   val stack: mutable.Stack[Int] = mutable.Stack.empty[Int]
 
-  def parseMessage(messageOrArg: String): String =
-    if (variables contains messageOrArg) variables(messageOrArg).toString
-    else messageOrArg
-
-  def msg(messagesAndRegs: List[String]): Unit =
-    output = Option(
-      output.getOrElse("")
-        + messagesAndRegs.map(parseMessage).mkString
-    )
-
-  def mov(reg: String, value: String): Unit = {
-    if (variables.contains(reg)) variables(reg) = parseValue(value)
-    else variables += reg -> parseValue(value)
+  abstract class Shift(instructionOffset: => Int) extends Instruction {
+    def getNextInstruction: Int = nextInstruction + instructionOffset
   }
 
-  def inc(reg: String): Unit =
-    add(reg, 1)
+  abstract class Operation extends Shift(1)
 
-  def dec(reg: String): Unit =
-    add(reg, -1)
-
-  def add(reg: String, value: Int): Unit =
-    variables(reg) += value
-
-  def add(reg: String, value: String): Unit =
-    add(reg, parseValue(value))
-
-  def sub(reg: String, value: String): Unit =
-    add(reg, -parseValue(value))
-
-  def mul(reg: String, value: String): Unit =
-    variables(reg) *= parseValue(value)
-
-  def div(reg: String, value: String): Unit =
-    variables(reg) /= parseValue(value)
-
-  def cmp(value1: String, value2: String): Unit =
-    e = parseValue(value1) compare parseValue(value2)
-
-  def jne(label: String): Unit = if (e != 0) jmp(label)
-  def je(label: String): Unit = if (e == 0) jmp(label)
-  def jge(label: String): Unit = if (e != 0 || e == 1) jmp(label)
-  def jg(label: String): Unit = if (e == 1) jmp(label)
-  def jle(label: String): Unit = if (e == 0 || e == -1) jmp(label)
-  def jl(label: String): Unit = if (e == -1) jmp(label)
-
-  def call(label: String): Unit = {
-    stack.append(functionIndexes(label))
-    nextInstruction = functionIndexes(label) - 1
+  case class msg(messagesAndRegs: String*) extends Operation {
+    override def apply: Unit =
+      output = Option { output.getOrElse("") +
+        messagesAndRegs
+          .map(messageOrReg => variables
+            .getOrElse(messageOrReg, messageOrReg)
+          ).mkString
+      }
   }
 
-  def jmp(label: String): Unit = {
-    nextInstruction = functionIndexes(label) - 1
+  case class mov(reg: String, value: String) extends Operation {
+    override def apply: Unit =
+      if (variables.contains(reg)) variables(reg) = parseValue(value)
+      else variables += reg -> parseValue(value)
   }
 
-  def define(label: String, instructions: List[Instruction]): Unit =
-    functionIndexes += label -> instructions
+  class inc(reg: String) extends add(reg, 1)
+
+  class dec(reg: String) extends add(reg, -1)
+
+  class add(reg: String, value: => Int) extends Operation {
+    def this(reg: String, regOrValue: String) =
+      this(reg, parseValue(regOrValue))
+    override def apply: Unit =
+      variables(reg) += value
+  }
+
+  class sub(reg: String, value: String) extends add(reg, -parseValue(value))
+
+  case class mul(reg: String, value: String) extends Operation {
+    override def apply: Unit = variables(reg) *= parseValue(value)
+  }
+
+  case class div(reg: String, value: String) extends Operation {
+    override def apply: Unit = variables(reg) /= parseValue(value)
+  }
+  case class cmp(value1: String, value2: String) extends Operation {
+    override def apply: Unit = e = parseValue(value1) compare parseValue(value2)
+  }
+
+  class jump(
+    var p: () => Boolean,
+    _nextInstruction: => Int
+  ) extends Operation {
+    override def apply: Unit = {}
+    override def getNextInstruction: Int =
+      if (p()) _nextInstruction
+      else super.getNextInstruction
+  }
+
+  abstract class jumpToLabel(p: () => Boolean, label: String)
+    extends jump(p, functionIndexes(label))
+
+  case class jmp(label: String) extends jumpToLabel(() => true, label)
+  case class jne(label: String) extends jumpToLabel(() => e != 0, label)
+  case class je (label: String) extends jumpToLabel(() => e == 0, label)
+  case class jge(label: String) extends jumpToLabel(() => e == 1 || e == 0, label)
+  case class jg (label: String) extends jumpToLabel(() => e == 1, label)
+  case class jle(label: String) extends jumpToLabel(() => e == -1 || e == 0, label)
+  case class jl (label: String) extends jumpToLabel(() => e == -1, label)
+
+  case class call(label: String) extends Instruction {
+    override def apply: Unit = stack.append(nextInstruction + 1)
+    override def getNextInstruction: Int = functionIndexes(label)
+  }
+
+  def define(label: String, functionInstructions: List[Instruction]): Unit = {
+    val index = instructions.length
+    instructions.appendAll(functionInstructions)
+    functionIndexes += label -> index
+  }
 
   def parseValue(value: String): Int =
     value.toIntOption.getOrElse(variables(value))
 
-  def jnz(reg: String, value: String): Unit =
-    if (parseValue(reg) != 0) nextInstruction += parseValue(value) - 1
+  case class jnz(reg: String, value: String)
+    extends jump(() => parseValue(reg) != 0, parseValue(value))
 
-  def ret: Unit = nextInstruction = stack.pop
-  def end: Unit = break
+  class ret extends Instruction {
+    private def next = stack.pop
+    override def apply: Unit = {}
+    override def getNextInstruction: Int = next
+  }
+
+  class end extends Operation {
+    override def apply: Unit = break
+  }
+
+  val instructionTypes = List(
+    classOf[mov], classOf[msg],
+    classOf[inc], classOf[dec],
+    classOf[sub], classOf[add],
+    classOf[div], classOf[mul],
+    classOf[jnz], classOf[jmp], classOf[call],
+    classOf[cmp],
+    classOf[je], classOf[jne],
+    classOf[jge], classOf[jg],
+    classOf[jle], classOf[jl],
+    classOf[ret], classOf[end]
+  )
 
   def run: Interpreter = {
     nextInstruction = 0
-
-      while (nextInstruction < instructions.length) {
-        instructions(nextInstruction)(this)
-        nextInstruction += 1
+    breakable {
+      while (true) {
+        val instruction = instructions(nextInstruction)
+        instruction.apply
+        nextInstruction = instruction.getNextInstruction
       }
-
+    }
     this
   }
 }
 
 object Interpreter {
 
-  case class Instruction(instructionName: String, args: List[Any] = List.empty[Any]) {
-    private val interpreterInstanceClass = new Interpreter().getClass
-    val argsClasses: Seq[Class[_]] = args.map(_.getClass)
-
-    def apply(interpreter: Interpreter): Unit = try
-      interpreterInstanceClass
-        .getMethod(instructionName, argsClasses: _*)
-        .invoke(interpreter, args: _*)
-      catch {
-        case e: InvocationTargetException => throw e.getTargetException
-        case e => throw e
-      }
-
-    override def toString: String = s"$instructionName ${args.mkString(", ")}"
-  }
-
-  object Instruction {
-    def fromLineOption(line: String): Option[Instruction] = {
-      val interpreterMethodNames = new Interpreter().getClass.getMethods.map(_.getName)
-      // todo parseArgs
-      parseArguments(line.strip) match {
-        case "ret" :: _ => Option(new Instruction("ret"))
-
-        case List(instructionName@_, args@_*)
-          if interpreterMethodNames contains instructionName => Option {
-            if (instructionName == "msg")
-              new Instruction(instructionName, args.toList) {
-                override def apply(interpreter: Interpreter): Unit =
-                  interpreter.msg(args.map(_.asInstanceOf[String]))
-              }
-            else
-              new Instruction(instructionName, args.toList)
-        }
-
-        case _ :: ";" :: _ => Option {
-          new Instruction(";") {
-            override def apply(interpreter: Interpreter): Unit = {}
-          }
-        }
-
-        case _ => Option.empty[Instruction]
-      }
-    }
-
-    def fromLine(line: String): Instruction = fromLineOption(line) match {
-      case Some(value) => value
-      case None => throw new IllegalArgumentException(s"Cannot parse line: $line")
-    }
+  trait Instruction {
+    def apply: Unit
+    def getNextInstruction: Int
   }
 
   def parseArguments(args: String): List[String] = {
-    val buffer = new mutable.StringBuilder()
-    val parsedArgs = new ListBuffer[String]
-    var waitString = false
+      val buffer = new mutable.StringBuilder()
+      val parsedArgs = new ListBuffer[String]
+      var waitString = false
 
-    def appendArg: Unit = {
-      if (buffer.nonEmpty) parsedArgs.append(buffer.toString)
-      buffer.clear
+      def appendArg: Unit = {
+        if (buffer.nonEmpty) parsedArgs.append(buffer.toString)
+        buffer.clear
+      }
+
+      args
+        .foreach {
+          case '\'' => waitString = !waitString
+          case ';' =>
+            appendArg
+            return parsedArgs.toList
+          case ' ' | ',' if !waitString => appendArg
+          case c => buffer.append(c)
+        }
+      appendArg
+      parsedArgs.toList
     }
 
-    args
-      .map {
-        case '\'' => waitString = !waitString
-        case ';' =>
-          appendArg
-          return parsedArgs.toList
-        case ' ' | ',' if !waitString => appendArg
-        case c => buffer.append(c)
-      }
-    appendArg
-    parsedArgs.toList
-  }
+    def parseProgram(program: String): Interpreter = {
+      val interpreter = new Interpreter()
 
-  def parseProgram(program: String): List[Instruction] = {
-    val stringInstructions = program
-      .split("\n")
-      .toList
-      .filter(_.nonEmpty)
+      val instructionTypeByName = interpreter
+        .instructionTypes
+        .map(instructionType => (instructionType.getSimpleName, instructionType))
+        .toMap
 
-    val instructions = stringInstructions
-      .takeWhile(_ != "end")
-      .map(Instruction.fromLine)
+      val stringInstructions = program
+        .split("\n")
+        .toList
+        .map(parseArguments)
+        .filter(_.nonEmpty)
 
-    var prevLabel: String = "labels"
+      val instructionBuffer = ListBuffer.empty[Instruction]
+      var prevLabel = "@start"
 
-    val groups = stringInstructions
-      .dropWhile(_ != "end")
-      .drop(1)
-      .groupBy {
-        case s"$label:$_" =>
-          prevLabel = label
-          "labels"
-        case _ => prevLabel
-      }
+      stringInstructions
+        .foreach {
+          case s"$label:" :: _ =>
+            interpreter.define(prevLabel, instructionBuffer.toList)
+            prevLabel = label
+            instructionBuffer.clear
 
-    val functions = groups
-      .filter(_._1 != "labels")
-      .map(tupled(
-        (label, instructions) =>
-          // define instruction
-          new Instruction("define", instructions) {
-            override def apply(interpreter: Interpreter): Unit =
-              interpreter.define(label, instructions.map(Instruction.fromLine))
-          }
-      ))
-      .toList
+          case List("msg", args@_*) => instructionBuffer.append(interpreter.msg(args: _*))
+          case List(instructionName, args@_*)
+            if instructionTypeByName contains instructionName =>
+              val argClasses: Seq[Class[_]] = classOf[Interpreter] +: args.map(_.getClass)
+              val constructorArgs = interpreter +: args
 
-    functions ++ instructions
-  }
+              instructionBuffer.append {
+                instructionTypeByName(instructionName)
+                  .getConstructor(argClasses: _*)
+                  .newInstance(constructorArgs: _*)
+              }
+
+          case line => throw new IllegalArgumentException(s"Cannot parse line: $line")
+        }
+
+      interpreter.define(prevLabel, instructionBuffer.toList)
+      interpreter
+    }
 }
 
 object AssemblerInterpreter {
   def interpret(input: String): Option[String] = {
-    val interpreter = new Interpreter()
-    interpreter.execute(Interpreter.parseProgram(input), verbose = true).output
+    val interpreter = parseProgram(input)
+
+    try interpreter.run
+    catch { case _: Throwable =>
+      return Option.empty[String]
+    }
+
+    interpreter.output
   }
 }
